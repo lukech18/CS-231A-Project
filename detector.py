@@ -1,7 +1,12 @@
+import re
+from scipy import fftpack, ndimage
+import scipy.misc
+import cv2
 import numpy as np
+from matplotlib import pyplot as plt
+
 import os
 from sklearn.svm import LinearSVC
-import matplotlib.pyplot as plt
 from scipy.ndimage import imread
 from utils import *
 
@@ -47,7 +52,7 @@ compute the SVM score for that window. If it's greater than 1 (the SVM decision
 boundary), add it to the bounding box list. At the very end, after implementing 
 nonmaximal suppression, you will filter the nonmaximal bounding boxes out.
 '''
-def run_detector(im, clf, window_size, cell_size, block_size, nbins, thresh=1):
+def run_detector(im, clf, window_size, cell_size, block_size, nbins, thresh=.5):
     window_height, window_width = window_size[0], window_size[1]
     image_height, image_width = im.shape[0], im.shape[1]
     # Number of pixels we move the sliding window to compute the features for a new window
@@ -58,6 +63,8 @@ def run_detector(im, clf, window_size, cell_size, block_size, nbins, thresh=1):
     bboxes = []
     scores = []
     # Iterate over the image sliding the window by stride pixels each time
+    print num_windows_across
+    print num_windows_down
     for i in range(num_windows_down):
         for j in range(num_windows_across):
             window_x_min = j * stride
@@ -147,18 +154,33 @@ def non_max_suppression(bboxes, confidences):
     
     return nms_bboxes
 
-
+    
 if __name__ == '__main__':
     block_size = 2
     cell_size = 6
     nbins = 9
-    window_size = np.array([36, 36])
+    window_size = np.array([48, 48])
+    
+    # Transform the input images, scaling them to be a standard size
+    def resize_images(inputDirectory, outputDirectory):
+        for root, dirnames, filenames in os.walk(inputDirectory):
+            for filename in filenames:
+                if re.search("\.(JPG|jpg|jpeg|png|bmp|tiff)$", filename):
+                    filepath = os.path.join(root, filename)
+                    image = ndimage.imread(filepath, mode="RGB")
+                    image_resized = scipy.misc.imresize(image, (window_size[0], window_size[1]))
+                    scipy.misc.imsave(outputDirectory + "/" + filename + "_resized.jpg", image_resized)
 
+                    
+    #if not (os.path.exists('data/resized_defect_images') and os.path.exists ('data/resized_non_defect_images')):
+    resize_images("data/defect_images", "data/resized_defect_images")
+    #resize_images("data/non_defect_images", "data/resized_non_defect_images")
+        
     # compute or load features for training
     if not (os.path.exists('data/features_pos.npy') and os.path.exists('data/features_neg.npy')):
-        features_pos = get_positive_features('data/caltech_faces/Caltech_CropFaces', cell_size, window_size, block_size, nbins)
-        num_negative_examples = 10000
-        features_neg = get_random_negative_features('data/train_non_face_scenes', cell_size, window_size, block_size, nbins, num_negative_examples)
+        features_pos = get_positive_features('data/resized_defect_images', cell_size, window_size, block_size, nbins)
+        num_negative_examples = 1000
+        features_neg = get_random_negative_features('data/non_defect_images', cell_size, window_size, block_size, nbins, num_negative_examples)
         np.save('data/features_pos.npy', features_pos)
         np.save('data/features_neg.npy', features_neg)
     else:
@@ -172,14 +194,20 @@ if __name__ == '__main__':
     clf = LinearSVC(C=1, tol=1e-6, max_iter=10000, fit_intercept=True, loss='hinge')
     clf.fit(X, Y)
     score = clf.score(X, Y)
+    
+    print "Successfully trained classifier"
 
-    # Part A: Sliding window detector
-    im = imread('data/people.jpg', 'L').astype(np.uint8)
-    bboxes, scores = run_detector(im, clf, window_size, cell_size, block_size, nbins)
-    plot_img_with_bbox(im, bboxes, 'Without nonmaximal suppresion')
-    plt.show()
+    #directory = "data/defect_images"
+    #for filename in os.listdir(directory):
+    for i in range(1, 8):
+        filename = "data/test_fabric_" + str(i) + ".jpg"
+        # Part A: Sliding window detector
+        im = imread(filename, 'L').astype(np.uint8)
+        bboxes, scores = run_detector(im, clf, window_size, cell_size, block_size, nbins)
+        plot_img_with_bbox(im, bboxes, 'Without nonmaximal suppresion')
+        plt.show()
 
-    # Part B: Nonmaximal suppression
-    bboxes = non_max_suppression(bboxes, scores)
-    plot_img_with_bbox(im, bboxes, 'With nonmaximal suppresion')
-    plt.show()
+        # Part B: Nonmaximal suppression
+        bboxes = non_max_suppression(bboxes, scores)
+        plot_img_with_bbox(im, bboxes, 'With nonmaximal suppresion')
+        plt.show()
